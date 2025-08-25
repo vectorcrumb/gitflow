@@ -151,6 +151,39 @@ require_no_existing_release_branches() {
 		die "There is an existing release branch ($first_branch). Finish that one first."
 }
 
+generate_release_changelog() {
+	local version_prefix="$1"
+	local version="$2"
+	local base_commit="$3"
+	
+	# Determine the starting commit for changelog generation
+	local from_commit="$base_commit"
+	
+	# If base is the develop branch, try to find the last release tag
+	if [ "$base_commit" = "$DEVELOP_BRANCH" ]; then
+		local latest_tag=$(find_latest_version_tag "$version_prefix")
+		if [ -n "$latest_tag" ]; then
+			from_commit="$latest_tag"
+		else
+			die "fatal: No previous release tags found and base commit is '$DEVELOP_BRANCH'. Cannot determine changelog range."
+		fi
+	fi
+	
+	# Generate changelog entries between from_commit and current HEAD
+	local changelog_entries=$(generate_changelog_entries "$from_commit" "HEAD")
+	
+	# Update CHANGELOG.md
+	if update_changelog "$version_prefix" "$version" "$changelog_entries"; then
+		echo "Updated CHANGELOG.md for release ${version_prefix}${version}"
+		
+		# Add and commit the changelog
+		git_do add CHANGELOG.md
+		git_do commit -m "Update CHANGELOG.md for release ${version_prefix}${version}"
+	else
+		warn "Failed to update CHANGELOG.md"
+	fi
+}
+
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
 	DEFINE_boolean major false "bump major version instead of minor" M 
@@ -203,9 +236,13 @@ cmd_start() {
 	# create branch
 	git_do checkout -b "$BRANCH" "$BASE"
 
+	# Generate changelog for this release
+	generate_release_changelog "$VERSION_PREFIX" "$VERSION" "$BASE"
+
 	echo
 	echo "Summary of actions:"
 	echo "- A new branch '$BRANCH' was created, based on '$BASE'"
+	echo "- CHANGELOG.md has been updated with commits since '$BASE'"
 	echo "- You are now on branch '$BRANCH'"
 	echo
 	echo "Follow-up actions:"

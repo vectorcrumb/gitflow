@@ -353,27 +353,34 @@ parse_version_from_tag() {
 find_latest_version_tag() {
 	local prefix="$1"
 	local latest_tag=""
-	local latest_major=0
-	local latest_minor=0
-	local latest_patch=0
+	local latest_major=-1
+	local latest_minor=-1
+	local latest_patch=-1
 	
 	for tag in $(git_all_tags); do
-		local version=$(parse_version_from_tag "$tag" "$prefix")
-		if [ $? -eq 0 ] && [ -n "$version" ]; then
-			local major=$(echo "$version" | cut -d' ' -f1)
-			local minor=$(echo "$version" | cut -d' ' -f2)
-			local patch=$(echo "$version" | cut -d' ' -f3)
-			
-			# Compare versions (major.minor.patch)
-			if [ "$major" -gt "$latest_major" ] || \
-			   ( [ "$major" -eq "$latest_major" ] && [ "$minor" -gt "$latest_minor" ] ) || \
-			   ( [ "$major" -eq "$latest_major" ] && [ "$minor" -eq "$latest_minor" ] && [ "$patch" -gt "$latest_patch" ] ); then
-				latest_tag="$tag"
-				latest_major="$major"
-				latest_minor="$minor" 
-				latest_patch="$patch"
-			fi
-		fi
+		# Only consider tags that start with the exact prefix
+		case "$tag" in
+			"$prefix"*)
+				local version=$(parse_version_from_tag "$tag" "$prefix")
+				if [ $? -eq 0 ] && [ -n "$version" ]; then
+					local major=$(echo "$version" | cut -d' ' -f1)
+					local minor=$(echo "$version" | cut -d' ' -f2)
+					local patch=$(echo "$version" | cut -d' ' -f3)
+					
+					# Compare versions (major.minor.patch)
+					# Initialize with first valid version, then compare
+					if [ "$latest_major" -eq -1 ] || \
+					   [ "$major" -gt "$latest_major" ] || \
+					   ( [ "$major" -eq "$latest_major" ] && [ "$minor" -gt "$latest_minor" ] ) || \
+					   ( [ "$major" -eq "$latest_major" ] && [ "$minor" -eq "$latest_minor" ] && [ "$patch" -gt "$latest_patch" ] ); then
+						latest_tag="$tag"
+						latest_major="$major"
+						latest_minor="$minor" 
+						latest_patch="$patch"
+					fi
+				fi
+				;;
+		esac
 	done
 	
 	echo "$latest_tag"

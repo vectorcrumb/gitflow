@@ -72,6 +72,9 @@ setup_test_repo() {
     # Initialize git flow
     git flow init -d
     
+    # Set version tag prefix to match our test tags
+    git config gitflow.prefix.versiontag "v"
+    
     # Create test version tags
     git tag v1.0.0
     git tag v1.2.3

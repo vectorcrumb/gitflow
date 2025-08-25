@@ -57,6 +57,9 @@ setup_edge_test_repo() {
     git commit -m "Initial commit"
     
     git flow init -d
+    
+    # Set version tag prefix to match our test tags
+    git config gitflow.prefix.versiontag "v"
 }
 
 cleanup_edge_test_repo() {

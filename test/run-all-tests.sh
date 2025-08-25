@@ -236,6 +236,9 @@ run_manual_verification() {
     export PATH="$TEST_DIR:$PATH"
     git flow init -d >/dev/null 2>&1
     
+    # Set version tag prefix to match our test tags
+    git config gitflow.prefix.versiontag "v"
+    
     # Add test tags
     git tag v1.0.0
     git tag v1.5.0

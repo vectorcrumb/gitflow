@@ -153,7 +153,7 @@ require_no_existing_release_branches() {
 
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
-	DEFINE_boolean major false "bump major version instead of minor" 
+	DEFINE_boolean major false "bump major version instead of minor" M 
 	parse_args "$@"
 	
 	# If no version provided, auto-generate from latest tag

@@ -58,6 +58,9 @@ setup_integration_repo() {
     # Initialize git-flow
     git flow init -d
     
+    # Set version tag prefix to match our test tags
+    git config gitflow.prefix.versiontag "v"
+    
     # Create realistic git-flow history
     create_realistic_history
 }

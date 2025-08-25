@@ -46,7 +46,7 @@ init() {
 
 usage() {
 	echo "usage: git flow release [list] [-v]"
-	echo "       git flow release start [-F] <version> [<base>]"
+	echo "       git flow release start [-F] [--major] [<version>] [<base>]"
 	echo "       git flow release finish [-FsumpkS] <version>"
 	echo "       git flow release publish <name>"
 	echo "       git flow release track <name>"
@@ -153,9 +153,39 @@ require_no_existing_release_branches() {
 
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
+	DEFINE_boolean major false "bump major version instead of minor" 
 	parse_args "$@"
+	
+	# If no version provided, auto-generate from latest tag
+	if [ "$VERSION" = "" ]; then
+		local latest_tag=$(find_latest_version_tag "$VERSION_PREFIX")
+		if [ -z "$latest_tag" ]; then
+			die "fatal: No existing version tags found matching pattern '${VERSION_PREFIX}X.Y.Z'. Cannot auto-generate version."
+		fi
+		
+		local version_from_tag=$(parse_version_from_tag "$latest_tag" "$VERSION_PREFIX")
+		local current_version=$(echo "$version_from_tag" | tr ' ' '.')
+		
+		local bump_type="minor"
+		if flag major; then
+			bump_type="major"
+		fi
+		
+		VERSION=$(bump_version "$current_version" "$bump_type")
+		BRANCH=$PREFIX$VERSION
+		
+		echo "Auto-generated version: $VERSION (based on latest tag: $latest_tag)"
+	fi
+	
 	BASE=${2:-$DEVELOP_BRANCH}
-	require_version_arg
+	
+	# After auto-generation, VERSION should be set
+	if [ "$VERSION" = "" ]; then
+		warn "Missing argument <version>"
+		usage
+		exit 1
+	fi
+	
 	require_base_is_on_develop
 	require_no_existing_release_branches
 

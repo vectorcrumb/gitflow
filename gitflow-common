@@ -409,3 +409,69 @@ bump_version() {
 	
 	echo "${major}.${minor}.${patch}"
 }
+
+#
+# Changelog generation functionality
+#
+
+# Generate changelog entries by getting commit subject lines between two commits
+# Usage: generate_changelog_entries <from_commit> <to_commit>
+generate_changelog_entries() {
+	local from_commit="$1"
+	local to_commit="$2"
+	
+	if [ -z "$from_commit" ] || [ -z "$to_commit" ]; then
+		return 1
+	fi
+	
+	# Get commit subject lines between from_commit and to_commit (exclusive of from_commit, inclusive of to_commit)
+	git log --pretty=format:"- %s" "${from_commit}..${to_commit}"
+}
+
+# Update or create CHANGELOG.md with new release entry
+# Usage: update_changelog <version_prefix> <version> <changelog_entries>
+update_changelog() {
+	local version_prefix="$1"
+	local version="$2"
+	local changelog_entries="$3"
+	local changelog_file="CHANGELOG.md"
+	
+	if [ -z "$version_prefix" ] || [ -z "$version" ]; then
+		return 1
+	fi
+	
+	# Create CHANGELOG.md if it doesn't exist
+	if [ ! -f "$changelog_file" ]; then
+		echo "# Changelog" > "$changelog_file"
+		echo "" >> "$changelog_file"
+	fi
+	
+	# Prepare the new release section
+	local release_header="## ${version_prefix}${version}"
+	local temp_file=$(mktemp)
+	
+	# Check if this release already exists in changelog
+	if grep -q "^${release_header}$" "$changelog_file" 2>/dev/null; then
+		warn "Release ${version_prefix}${version} already exists in CHANGELOG.md"
+		rm "$temp_file"
+		return 0
+	fi
+	
+	# Read existing changelog and insert new release at the top
+	{
+		head -1 "$changelog_file"  # Keep "# Changelog" header
+		echo ""
+		echo "$release_header"
+		echo ""
+		if [ -n "$changelog_entries" ]; then
+			echo "$changelog_entries"
+		else
+			echo "- No changes"
+		fi
+		echo ""
+		tail -n +2 "$changelog_file"  # Keep rest of file
+	} > "$temp_file"
+	
+	# Replace original with updated content
+	mv "$temp_file" "$changelog_file"
+}

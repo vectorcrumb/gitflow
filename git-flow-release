@@ -46,7 +46,7 @@ init() {
 
 usage() {
 	echo "usage: git flow release [list] [-v]"
-	echo "       git flow release start [-F] [--major] [<version>] [<base>]"
+	echo "       git flow release start [-F] [--major] [--gather-from <commit>] [--upto <commit>] [<version>]"
 	echo "       git flow release finish [-FsumpkS] <version>"
 	echo "       git flow release publish <name>"
 	echo "       git flow release track <name>"
@@ -151,9 +151,65 @@ require_no_existing_release_branches() {
 		die "There is an existing release branch ($first_branch). Finish that one first."
 }
 
+generate_release_changelog() {
+	local version_prefix="$1"
+	local version="$2"
+	local base_commit="$3"
+	local gather_from_commit="$4"
+	
+	# Determine the starting commit for changelog generation
+	local from_commit=""
+	local to_commit="$DEVELOP_BRANCH"
+	
+	# If --gather-from is specified, use that as the starting point
+	if [ -n "$gather_from_commit" ]; then
+		from_commit="$gather_from_commit"
+		echo "Using --gather-from commit: $gather_from_commit"
+	else
+		# Legacy behavior: try to find the last release tag
+		local latest_tag=$(find_latest_version_tag "$version_prefix")
+		if [ -n "$latest_tag" ]; then
+			from_commit="$latest_tag"
+			echo "Using latest release tag for changelog: $latest_tag"
+		else
+			# If no tags exist, use the base commit as starting point
+			from_commit="$base_commit"
+			echo "No release tags found, using base commit: $base_commit"
+		fi
+	fi
+	
+	# If --gather-from is specified but --upto is not, always use develop as upper bound
+	# If --upto was specified and differs from develop, use that as upper bound
+	if [ -n "$gather_from_commit" ] && [ "$base_commit" = "$DEVELOP_BRANCH" ]; then
+		to_commit="$DEVELOP_BRANCH"
+		echo "Using develop branch as changelog upper bound"
+	elif [ "$base_commit" != "$DEVELOP_BRANCH" ]; then
+		to_commit="$base_commit"
+		echo "Using --upto commit as changelog upper bound: $base_commit"
+	fi
+	
+	echo "Generating changelog from $from_commit to $to_commit"
+	
+	# Generate changelog entries between from_commit and to_commit
+	local changelog_entries=$(generate_changelog_entries "$from_commit" "$to_commit")
+	
+	# Update CHANGELOG.md
+	if update_changelog "$version_prefix" "$version" "$changelog_entries"; then
+		echo "Updated CHANGELOG.md for release ${version_prefix}${version}"
+		
+		# Add and commit the changelog
+		git_do add CHANGELOG.md
+		git_do commit -m "Update CHANGELOG.md for release ${version_prefix}${version}"
+	else
+		warn "Failed to update CHANGELOG.md"
+	fi
+}
+
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
-	DEFINE_boolean major false "bump major version instead of minor" M 
+	DEFINE_boolean major false "bump major version instead of minor" M
+	DEFINE_string gather_from "" "commit from which to start gathering changelog entries" G
+	DEFINE_string upto "" "commit up to which to create the release branch (default: develop)" U
 	parse_args "$@"
 	
 	# If no version provided, auto-generate from latest tag
@@ -177,7 +233,19 @@ cmd_start() {
 		echo "Auto-generated version: $VERSION (based on latest tag: $latest_tag)"
 	fi
 	
-	BASE=${2:-$DEVELOP_BRANCH}
+	# Handle --upto argument, defaulting to develop branch
+	if [ "$FLAGS_upto" != "" ]; then
+		BASE="$FLAGS_upto"
+	else
+		BASE="$DEVELOP_BRANCH"
+	fi
+	
+	# Handle legacy positional base argument for backward compatibility
+	# Only use positional argument if neither --upto nor --gather-from is specified
+	if [ "$2" != "" ] && [ "$FLAGS_upto" = "" ] && [ "$FLAGS_gather_from" = "" ]; then
+		BASE="$2"
+		warn "Using positional base argument is deprecated. Use --upto instead."
+	fi
 	
 	# After auto-generation, VERSION should be set
 	if [ "$VERSION" = "" ]; then
@@ -203,9 +271,21 @@ cmd_start() {
 	# create branch
 	git_do checkout -b "$BRANCH" "$BASE"
 
+	# Generate changelog for this release
+	generate_release_changelog "$VERSION_PREFIX" "$VERSION" "$BASE" "$FLAGS_gather_from"
+
 	echo
 	echo "Summary of actions:"
 	echo "- A new branch '$BRANCH' was created, based on '$BASE'"
+	if [ -n "$FLAGS_gather_from" ]; then
+		if [ "$BASE" != "$DEVELOP_BRANCH" ]; then
+			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_gather_from' to '$BASE'"
+		else
+			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_gather_from' to '$DEVELOP_BRANCH'"
+		fi
+	else
+		echo "- CHANGELOG.md has been updated with commits for this release"
+	fi
 	echo "- You are now on branch '$BRANCH'"
 	echo
 	echo "Follow-up actions:"

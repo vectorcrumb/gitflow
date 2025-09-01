@@ -424,8 +424,12 @@ generate_changelog_entries() {
 		return 1
 	fi
 	
-	# Get commit subject lines between from_commit and to_commit (exclusive of from_commit, inclusive of to_commit)
-	git log --pretty=format:"- %s" "${from_commit}..${to_commit}"
+	# Get commit subject lines between from_commit and to_commit (inclusive of from_commit)
+	# Inclusive of from_commit format (^): https://stackoverflow.com/a/45694424
+	# Filter out:
+	# - Merge commits (--no-merges) to avoid "Merge branch 'release/x.x.x' into develop" entries
+	# - CHANGELOG update commits (--grep) to avoid "Update CHANGELOG.md for release vX.X.X" entries
+	git log --pretty=format:"- %s" --no-merges --grep="Update CHANGELOG.md" --invert-grep "${from_commit}^..${to_commit}"
 }
 
 # Update or create CHANGELOG.md with new release entry

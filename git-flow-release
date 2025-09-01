@@ -46,7 +46,7 @@ init() {
 
 usage() {
 	echo "usage: git flow release [list] [-v]"
-	echo "       git flow release start [-F] [--major] [--gather-from <commit>] [--upto <commit>] [<version>]"
+	echo "       git flow release start [-F] [-M] [-i <commit>] [-u <commit>] [<version>]"
 	echo "       git flow release finish [-FsumpkS] <version>"
 	echo "       git flow release publish <name>"
 	echo "       git flow release track <name>"
@@ -155,16 +155,16 @@ generate_release_changelog() {
 	local version_prefix="$1"
 	local version="$2"
 	local base_commit="$3"
-	local gather_from_commit="$4"
+	local initial_commit="$4"
 	
 	# Determine the starting commit for changelog generation
 	local from_commit=""
 	local to_commit="$DEVELOP_BRANCH"
 	
-	# If --gather-from is specified, use that as the starting point
-	if [ -n "$gather_from_commit" ]; then
-		from_commit="$gather_from_commit"
-		echo "Using --gather-from commit: $gather_from_commit"
+	# If -i is specified, use that as the starting point
+	if [ -n "$initial_commit" ]; then
+		from_commit="$initial_commit"
+		echo "Using -i commit: $initial_commit"
 	else
 		# Legacy behavior: try to find the last release tag
 		local latest_tag=$(find_latest_version_tag "$version_prefix")
@@ -178,14 +178,14 @@ generate_release_changelog() {
 		fi
 	fi
 	
-	# If --gather-from is specified but --upto is not, always use develop as upper bound
-	# If --upto was specified and differs from develop, use that as upper bound
-	if [ -n "$gather_from_commit" ] && [ "$base_commit" = "$DEVELOP_BRANCH" ]; then
+	# If -i is specified but -i is not, always use develop as upper bound
+	# If -u was specified and differs from develop, use that as upper bound
+	if [ -n "$initial_commit" ] && [ "$base_commit" = "$DEVELOP_BRANCH" ]; then
 		to_commit="$DEVELOP_BRANCH"
 		echo "Using develop branch as changelog upper bound"
 	elif [ "$base_commit" != "$DEVELOP_BRANCH" ]; then
 		to_commit="$base_commit"
-		echo "Using --upto commit as changelog upper bound: $base_commit"
+		echo "Using -u commit as changelog upper bound: $base_commit"
 	fi
 	
 	echo "Generating changelog from $from_commit to $to_commit"
@@ -208,8 +208,8 @@ generate_release_changelog() {
 cmd_start() {
 	DEFINE_boolean fetch false "fetch from $ORIGIN before performing finish" F
 	DEFINE_boolean major false "bump major version instead of minor" M
-	DEFINE_string gather_from "" "commit from which to start gathering changelog entries" G
-	DEFINE_string upto "" "commit up to which to create the release branch (default: develop)" U
+	DEFINE_string initial "" "commit from which to start gathering changelog entries" i
+	DEFINE_string upto "" "commit up to which to create the release branch (default: develop)" u
 	parse_args "$@"
 	
 	# If no version provided, auto-generate from latest tag
@@ -233,7 +233,7 @@ cmd_start() {
 		echo "Auto-generated version: $VERSION (based on latest tag: $latest_tag)"
 	fi
 	
-	# Handle --upto argument, defaulting to develop branch
+	# Handle -u argument, defaulting to develop branch
 	if [ "$FLAGS_upto" != "" ]; then
 		BASE="$FLAGS_upto"
 	else
@@ -241,10 +241,10 @@ cmd_start() {
 	fi
 	
 	# Handle legacy positional base argument for backward compatibility
-	# Only use positional argument if neither --upto nor --gather-from is specified
-	if [ "$2" != "" ] && [ "$FLAGS_upto" = "" ] && [ "$FLAGS_gather_from" = "" ]; then
+	# Only use positional argument if neither -u nor -i is specified
+	if [ "$2" != "" ] && [ "$FLAGS_upto" = "" ] && [ "$FLAGS_initial" = "" ]; then
 		BASE="$2"
-		warn "Using positional base argument is deprecated. Use --upto instead."
+		warn "Using positional base argument is deprecated. Use -u(pto) instead."
 	fi
 	
 	# After auto-generation, VERSION should be set
@@ -272,16 +272,16 @@ cmd_start() {
 	git_do checkout -b "$BRANCH" "$BASE"
 
 	# Generate changelog for this release
-	generate_release_changelog "$VERSION_PREFIX" "$VERSION" "$BASE" "$FLAGS_gather_from"
+	generate_release_changelog "$VERSION_PREFIX" "$VERSION" "$BASE" "$FLAGS_initial"
 
 	echo
 	echo "Summary of actions:"
 	echo "- A new branch '$BRANCH' was created, based on '$BASE'"
-	if [ -n "$FLAGS_gather_from" ]; then
+	if [ -n "$FLAGS_initial" ]; then
 		if [ "$BASE" != "$DEVELOP_BRANCH" ]; then
-			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_gather_from' to '$BASE'"
+			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_initial' to '$BASE'"
 		else
-			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_gather_from' to '$DEVELOP_BRANCH'"
+			echo "- CHANGELOG.md has been updated with commits from '$FLAGS_initial' to '$DEVELOP_BRANCH'"
 		fi
 	else
 		echo "- CHANGELOG.md has been updated with commits for this release"
@@ -339,7 +339,7 @@ cmd_finish() {
 		git_do checkout "$MASTER_BRANCH" || \
 		  die "Could not check out $MASTER_BRANCH."
 		if noflag squash; then
-			git_do merge --no-ff "$BRANCH" || \
+			git_do merge --no-edit --no-ff "$BRANCH" || \
 				die "There were merge conflicts."
 				# TODO: What do we do now?
 		else
@@ -358,8 +358,20 @@ cmd_finish() {
 			local opts="-a"
 			flag sign && opts="$opts -s"
 			[ "$FLAGS_signingkey" != "" ] && opts="$opts -u '$FLAGS_signingkey'"
-			[ "$FLAGS_message" != "" ] && opts="$opts -m '$FLAGS_message'"
-			[ "$FLAGS_messagefile" != "" ] && opts="$opts -F '$FLAGS_messagefile'"
+			
+			# Handle tag message - pre-populate editor with tag name if no message provided
+			if [ "$FLAGS_message" != "" ]; then
+				opts="$opts -m '$FLAGS_message'"
+			elif [ "$FLAGS_messagefile" != "" ]; then
+				opts="$opts -F '$FLAGS_messagefile'"
+			else
+				# Create temporary file with tag name as default message
+				local temp_msg_file=$(mktemp)
+				echo "$tagname" > "$temp_msg_file"
+				opts="$opts -F '$temp_msg_file' -e"
+				trap "rm -f '$temp_msg_file'" EXIT
+			fi
+			
 			eval git_do tag $opts "$tagname" "$BRANCH" || \
 			die "Tagging failed. Please run finish again to retry."
 		fi
@@ -375,7 +387,7 @@ cmd_finish() {
 		# TODO: Actually, accounting for 'git describe' pays, so we should
 		# ideally git merge --no-ff $tagname here, instead!
 		if noflag squash; then
-			git_do merge --no-ff "$BRANCH" || \
+			git_do merge --no-edit --no-ff "$BRANCH" || \
 				die "There were merge conflicts."
 				# TODO: What do we do now?
 		else
